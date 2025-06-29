@@ -12,6 +12,7 @@ import time
 import re
 import phonemizer
 from munch import Munch
+import unicodedata
 
 # --- Helpers: DataParallel + attr-dict ------------------------------------
 class MyDataParallel(torch.nn.DataParallel):
@@ -84,10 +85,26 @@ print("Models loaded and ready.")
 
 # --- Step 2: Load flat global phoneme→viseme map --------------------------
 def load_global_map(json_path):
+    """
+    Reads JSON { phoneme: visemeID } map,
+    normalizes all phoneme keys to NFC,
+    and casts viseme IDs to int.
+    """
     with open(json_path, 'r', encoding='utf-8') as f:
-        gm = json.load(f)
-    # cast IDs to int
-    return {ph: int(vid) for ph, vid in gm.items()}
+        raw = json.load(f)
+
+    norm_map = {}
+    for ph, vid in raw.items():
+        # normalize to NFC so composed/decomposed forms match
+        key = unicodedata.normalize("NFC", ph)
+        try:
+            norm_map[key] = int(vid)
+        except (TypeError, ValueError):
+            # fallback to zero if vid is missing or non‐numeric
+            norm_map[key] = 0
+
+    return norm_map
+
 
 import torchaudio
 to_mel = torchaudio.transforms.MelSpectrogram(
