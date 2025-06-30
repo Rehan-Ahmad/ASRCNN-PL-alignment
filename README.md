@@ -1,15 +1,10 @@
 # ASRCNN-PL-alignment
 
-# ASRCNN-PL Viseme Alignment
+```sh
+git clone https://github.com/Rehan-Ahmad/ASRCNN-PL-alignment.git
+```
 
 This repository provides a tool for generating viseme timelines from audio and text using ASR models and phoneme-to-viseme mapping. It is designed for applications such as lip-syncing and speech animation.
-
-## Features
-
-- Aligns audio and text to produce phoneme durations.
-- Maps phonemes to visemes using a customizable JSON mapping.
-- Outputs a viseme timeline in JSON format.
-- Supports command-line arguments for flexible usage.
 
 ## Requirements
 
@@ -39,9 +34,4 @@ Model and preprocessing parameters are loaded from `Configs/config_ft.yml`. Adju
 
 ## Notes
 
-- Ensure your `global_map.json` maps phoneme strings to integer viseme IDs.
 - The script expects the ASR model and config files to be specified in `Configs/config_ft.yml`.
-
-## License
-
-See [LICENSE](LICENSE) for details.
