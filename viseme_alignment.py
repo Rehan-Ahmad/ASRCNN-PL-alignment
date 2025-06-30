@@ -84,7 +84,8 @@ print("Models loaded and ready.")
 
 # --- Step 2: Load flat global phoneme→viseme map --------------------------
 def load_global_map(json_path):
-    with open(json_path, 'r', encoding='utf-8') as f:
+    # with open(json_path, 'r', encoding='utf-8') as f:
+    with open(json_path, 'r') as f:
         gm = json.load(f)
     # cast IDs to int
     return {ph: int(vid) for ph, vid in gm.items()}
@@ -128,6 +129,8 @@ def get_phoneme_durations(audio_arr, phonetic_transcription):
         tok_ids = [cleaner.word_index_dictionary.get(ch, 0)
                    for ch in phonetic_transcription
                    if ch in cleaner.word_index_dictionary]
+        tok_ids.insert(0, 0)
+    
     txt_t = torch.tensor(tok_ids, dtype=torch.long).unsqueeze(0).to(device)
     txt_len = torch.tensor([txt_t.shape[-1]], dtype=torch.long)
 
@@ -203,19 +206,22 @@ def remove_special_characters(text):
 
 # === USAGE & WARM-UP (in Colab) ===========================================
 if __name__ == "__main__":
-    # audio_file = "../mascot/input_audio_text/11ElevenLabs.mp3"
-    # text_file = "../mascot/input_audio_text/11ElevenLabsText.txt"
-    audio_file = "../mascot/input_audio_text/ElevenLabs_Michael_speech_2.mp3"
-    text_file = "../mascot/input_audio_text/ElevenLabs_Michael_speech_2.txt"
+    input_path = "wav_text_files"
+    audio_file = os.path.join(input_path, "11ElevenLabs.mp3")
+    text_file = os.path.join(input_path, "11ElevenLabs.txt")
+    # audio_file = os.path.join(input_path, "ElevenLabs_Michael_speech_2.mp3")
+    # text_file = os.path.join(input_path, "ElevenLabs_Michael_speech_2.txt")
 
     # audio_file = "Data/wavs/LJ050-0234.wav"
     # phonetic   = "ɪt hɐz jˈuːzd ˈʌðɚ tɹˈɛʒɚɹi lˈɔː ɛnfˈoːɹsmənt ˈeɪdʒənts ˌɔn spˈɛʃəl ɛkspˈɛɹɪmənts ɪn bˈɪldɪŋ ænd ɹˈaʊt sˈɜːveɪz ɪn plˈeɪsᵻz tʊ wˌɪtʃ ðə pɹˈɛzɪdənt fɹˈiːkwəntli tɹˈævəlz ."
     global_map_json = "global_map.json"
     global_phonemizer = phonemizer.backend.EspeakBackend(language='en-us', preserve_punctuation=True,  with_stress=False)
 
+    print(f"Processing audio file: {audio_file}")
     with open(text_file, 'r', encoding='utf-8') as f:
         text = f.read().strip()
-        text = remove_special_characters(text)  
+
+    text = remove_special_characters(text)
     ps = global_phonemizer.phonemize([text])
     phonetic = ps[0]
     print(f"\nInput text: {text}")
@@ -239,7 +245,7 @@ if __name__ == "__main__":
     # audio, _ = librosa.load(audio_file, sr=sr)
     print(f"Audio duration: {len(audio) / sr:.2f} seconds.")
 
-    outfile = audio_file.split('/')[-1][:-3] + "_timeline.json"
+    outfile = os.path.join(input_path, audio_file.split('/')[-1][:-3] + "_timeline.json")
     with open(outfile, 'w') as f:
       json.dump(timeline, f, indent=2)
 
