@@ -12,14 +12,8 @@ import time
 import re
 import phonemizer
 from munch import Munch
-
-# --- Helpers: DataParallel + attr-dict ------------------------------------
-class MyDataParallel(torch.nn.DataParallel):
-    def __getattr__(self, name):
-        try:
-            return super().__getattr__(name)
-        except AttributeError:
-            return getattr(self.module, name)
+import argparse
+import torchaudio
 
 class DotDict(dict):
     __getattr__ = dict.get
@@ -43,6 +37,7 @@ cfg = dict_to_dotdict(yaml.safe_load(open('Configs/config_ft.yml')))
 sr         = cfg.preprocess_params.get('sr', 24000)
 hop_length = cfg.preprocess_params.spect_params.get('hop_length', 256)
 n_mels     = cfg.preprocess_params.spect_params.get('n_mels', 80)
+# print(f"Sample rate: {sr}, hop length: {hop_length}, n_mels: {n_mels}")
 
 # patch torch.load to ignore weights_only flag
 _old_torch_load = torch.load
@@ -53,29 +48,14 @@ torch.load = _torch_load_patch
 
 # load ASR & pitch models
 with torch.serialization.safe_globals([getattr, OneCycleLR]):
-    text_aligner   = load_ASR_models(cfg.ASR_path, cfg.ASR_config) \
-                         .to(device).eval()
-    # pitch_extractor = load_F0_models(cfg.F0_path) \
-    #                      .to(device).eval()
+    text_aligner = load_ASR_models(cfg.ASR_path, cfg.ASR_config).to(device).eval()
 
 # restore original loader
 torch.load = _old_torch_load
 
-# load PLBERT and build full net
-# plb_model = load_plbert(cfg.get('PLBERT_dir', None))
 nets = Munch(text_aligner=text_aligner)
-# nets = build_model(cfg.model_params, text_aligner, pitch_extractor, plb_model)
 
-# move nets to device and wrap DataParallel where appropriate
-for name, net in nets.items():
-    try:
-        net = net.to(device)
-    except:
-        pass
-    if name not in ["mpd", "msd", "wd"]:
-        nets[name] = MyDataParallel(net)
-    else:
-        nets[name] = net
+nets['text_aligner'] = nets['text_aligner'].to(device)
 
 # record downsampling factor
 n_down = nets['text_aligner'].n_down
@@ -90,11 +70,11 @@ def load_global_map(json_path):
     # cast IDs to int
     return {ph: int(vid) for ph, vid in gm.items()}
 
-import torchaudio
 to_mel = torchaudio.transforms.MelSpectrogram(
     n_mels=80, n_fft=2048, win_length=1200, hop_length=300
     )
 mean, std = -4, 4
+
 def preprocess(wave):
     wave_tensor = torch.from_numpy(wave).float()
     mel_tensor = to_mel(wave_tensor)
@@ -105,22 +85,14 @@ def preprocess(wave):
 def get_phoneme_durations(audio_arr, phonetic_transcription):
     # 3a) create mel‐spec
     audio = audio_arr
-    # audio, _ = librosa.load(audio_path, sr=sr)
-    # mel = librosa.feature.melspectrogram(
-    #     y=audio, sr=sr,
-    #     hop_length=hop_length, n_mels=n_mels
-    # )
-    # mel = librosa.power_to_db(mel, ref=np.max)
     
     # custom preprocess function
     mel = preprocess(audio)
     mel = mel.squeeze(0)
     ############################
-    # mel_t = torch.tensor(mel).unsqueeze(0).to(device)
     mel_t = mel.unsqueeze(0).to(device)
     mel_len = torch.tensor([mel_t.shape[-1]], dtype=torch.long)
 
-    # import pdb; pdb.set_trace()
     # 3b) tokenize phonetic input
     cleaner = TextCleaner()
     if hasattr(cleaner, "text_to_sequence"):
@@ -204,18 +176,38 @@ def remove_special_characters(text):
     normalized_text = re.sub(chars_to_ignore_regex, '', text).lower()
     return normalized_text
 
-# === USAGE & WARM-UP (in Colab) ===========================================
 if __name__ == "__main__":
-    input_path = "wav_text_files"
-    audio_file = os.path.join(input_path, "11ElevenLabs.mp3")
-    text_file = os.path.join(input_path, "11ElevenLabs.txt")
-    # audio_file = os.path.join(input_path, "ElevenLabs_Michael_speech_2.mp3")
-    # text_file = os.path.join(input_path, "ElevenLabs_Michael_speech_2.txt")
 
-    # audio_file = "Data/wavs/LJ050-0234.wav"
-    # phonetic   = "ɪt hɐz jˈuːzd ˈʌðɚ tɹˈɛʒɚɹi lˈɔː ɛnfˈoːɹsmənt ˈeɪdʒənts ˌɔn spˈɛʃəl ɛkspˈɛɹɪmənts ɪn bˈɪldɪŋ ænd ɹˈaʊt sˈɜːveɪz ɪn plˈeɪsᵻz tʊ wˌɪtʃ ðə pɹˈɛzɪdənt fɹˈiːkwəntli tɹˈævəlz ."
-    global_map_json = "global_map.json"
-    global_phonemizer = phonemizer.backend.EspeakBackend(language='en-us', preserve_punctuation=True,  with_stress=False)
+    parser = argparse.ArgumentParser(
+        description="Generate viseme timeline from audio and text."
+        )
+    parser.add_argument('--audio_file', 
+                        default="wav_text_files/11ElevenLabs.mp3", 
+                        help="Path to the audio file"
+                        )
+    parser.add_argument('--text_file', 
+                        default="wav_text_files/11ElevenLabs.txt", 
+                        help="Path to the text file"
+                        )
+    parser.add_argument('--global_map_json', 
+                        default="global_map.json", 
+                        help="Path to the global phoneme-viseme map JSON"
+                        )
+    parser.add_argument('--output_path', default="wav_text_files", 
+                        help="Path to the global phoneme-viseme map JSON"
+                        )
+    args = parser.parse_args()
+
+    audio_file = args.audio_file
+    text_file = args.text_file
+    global_map_json = args.global_map_json
+    output_path = args.output_path
+
+    global_phonemizer = phonemizer.backend.EspeakBackend(
+        language='en-us', 
+        preserve_punctuation=True,  
+        with_stress=False
+        )
 
     print(f"Processing audio file: {audio_file}")
     with open(text_file, 'r', encoding='utf-8') as f:
@@ -226,30 +218,21 @@ if __name__ == "__main__":
     phonetic = ps[0]
     print(f"\nInput text: {text}")
     print(f"\nPhonetic transcription: {phonetic}\n")
-    # 1) First cold run (includes any lazy init)
-    # print("Cold run:")
-    # timeline = generate_viseme_timeline(audio_file, phonetic, global_map_json)
-    # print(json.dumps(timeline[:5], indent=2), "...")
 
     audio, _ = librosa.load(audio_file, sr=sr)
 
     # 2) Warm run for speed
-    print("Warm run timing:")
-    generate_viseme_timeline(audio, phonetic, global_map_json)
+    # print("Warm run timing:")
+    # generate_viseme_timeline(audio, phonetic, global_map_json)
 
-    # 3) Display final timeline & play audio
+    # 3) Generate final timeline.
     start = time.time()
     timeline = generate_viseme_timeline(audio, phonetic, global_map_json)
-    # print("Full timeline:", json.dumps(timeline, indent=2))
     print(f"Total time: {((time.time() - start)*1000):.2f} ms.")
-    # audio, _ = librosa.load(audio_file, sr=sr)
     print(f"Audio duration: {len(audio) / sr:.2f} seconds.")
 
-    outfile = os.path.join(input_path, audio_file.split('/')[-1][:-3] + "_timeline.json")
+    # save timeline to JSON
+    outfile = os.path.join(output_path, audio_file.split('/')[-1][:-4] + "_timeline.json")
     with open(outfile, 'w') as f:
       json.dump(timeline, f, indent=2)
-
-    # Play the audio inline in Colab
-    audio_data, sr = librosa.load(audio_file, sr=None)
-    # display(Audio(audio_data, rate=sr))
 
